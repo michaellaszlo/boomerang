@@ -8,9 +8,26 @@ import (
   "strings"
   "path/filepath"
   "errors"
+  "go/token"
+  "go/parser"
+  "go/printer"
 )
 
 const verbose bool = false
+
+var output ByteBuffer = ByteBuffer{ &[]byte{} }
+
+type ByteBuffer struct {
+  bytes *[]byte
+}
+func (buffer ByteBuffer) Write(bytes []byte) (n int, err error) {
+  *buffer.bytes = append(*buffer.bytes, bytes...)
+  return len(bytes), nil
+}
+func (buffer ByteBuffer) Bytes() []byte {
+  return *buffer.bytes
+}
+
 
 //--- Linear pattern matcher
 
@@ -108,7 +125,7 @@ func parse(templatePath string) error {
 func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
   current := stack[len(stack)-1]
   if verbose {
-    fmt.Printf("// start \"%s\"\n", current.SitePath)
+    fmt.Fprintf(output, "// start \"%s\"\n", current.SitePath)
   }
   var topLevel bool
   if len(stack) == 1 {
@@ -211,9 +228,9 @@ func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
     }
   }
   if verbose {
-    fmt.Printf("// finish \"%s\"\n", current.SitePath)
-    fmt.Printf("// read %d bytes, %d runes\n", countBytes, countRunes)
-    fmt.Printf("// finished on line %d\n", lineIndex)
+    fmt.Fprintf(output, "// finish \"%s\"\n", current.SitePath)
+    fmt.Fprintf(output, "// read %d bytes, %d runes\n", countBytes, countRunes)
+    fmt.Fprintf(output, "// finished on line %d\n", lineIndex)
   }
   if error == io.EOF {
     return nil
@@ -222,7 +239,7 @@ func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
 }
 
 func emitCode(content string) {
-  fmt.Print(content)
+  fmt.Fprint(output, content)
 }
 
 func emitStatic(content string) {
@@ -246,21 +263,34 @@ func emitStatic(content string) {
   }
 }
 func emitRaw(s string) {
-  fmt.Printf("fmt.Print(%s)\n", s)
+  fmt.Fprintf(output, "fmt.Print(%s)\n", s)
 }
 
 
 func main() {
+  writer := bufio.NewWriter(os.Stdout)
+  defer writer.Flush()
+
   numFiles := len(os.Args)-1
   if numFiles == 0 {
-    fmt.Printf("No files specified.\n")
+    writer.WriteString("No files specified.\n")
     return
   }
   for argIx := 1; argIx <= numFiles; argIx++ {
     path := os.Args[argIx]
     error := parse(path)
-    if error != nil {
-      fmt.Printf("error: %s\n", error)
+    if error == nil {
+      fileSet := token.NewFileSet()
+      source, error := parser.ParseFile(fileSet, "output", output.Bytes(), 0)
+      if error == nil {
+        printer.Fprint(writer, fileSet, source)
+      } else {
+        writer.Write(output.Bytes())
+        writer.WriteString("\n----------\n")
+        writer.WriteString(fmt.Sprintf("Go parsing error: %s\n", error))
+      }
+    } else {
+      writer.WriteString(fmt.Sprintf("template parsing error: %s\n", error))
     }
   }
 }
