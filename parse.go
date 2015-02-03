@@ -8,6 +8,7 @@ import (
   "strings"
   "path/filepath"
   "errors"
+  "bytes"
   "go/token"
   "go/parser"
   "go/printer"
@@ -15,18 +16,7 @@ import (
 
 const verbose bool = false
 
-var output ByteBuffer = ByteBuffer{ &[]byte{} }
-
-type ByteBuffer struct {
-  bytes *[]byte
-}
-func (buffer ByteBuffer) Write(bytes []byte) (n int, err error) {
-  *buffer.bytes = append(*buffer.bytes, bytes...)
-  return len(bytes), nil
-}
-func (buffer ByteBuffer) Bytes() []byte {
-  return *buffer.bytes
-}
+var output bytes.Buffer
 
 
 //--- Linear pattern matcher
@@ -125,7 +115,7 @@ func parse(templatePath string) error {
 func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
   current := stack[len(stack)-1]
   if verbose {
-    fmt.Fprintf(output, "// start \"%s\"\n", current.SitePath)
+    fmt.Fprintf(&output, "// start \"%s\"\n", current.SitePath)
   }
   var topLevel bool
   if len(stack) == 1 {
@@ -228,9 +218,9 @@ func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
     }
   }
   if verbose {
-    fmt.Fprintf(output, "// finish \"%s\"\n", current.SitePath)
-    fmt.Fprintf(output, "// read %d bytes, %d runes\n", countBytes, countRunes)
-    fmt.Fprintf(output, "// finished on line %d\n", lineIndex)
+    fmt.Fprintf(&output, "// finish \"%s\"\n", current.SitePath)
+    fmt.Fprintf(&output, "// read %d bytes, %d runes\n", countBytes, countRunes)
+    fmt.Fprintf(&output, "// finished on line %d\n", lineIndex)
   }
   if error == io.EOF {
     return nil
@@ -239,7 +229,7 @@ func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
 }
 
 func emitCode(content string) {
-  fmt.Fprint(output, content)
+  fmt.Fprint(&output, content)
 }
 
 func emitStatic(content string) {
@@ -263,7 +253,7 @@ func emitStatic(content string) {
   }
 }
 func emitRaw(s string) {
-  fmt.Fprintf(output, "fmt.Print(%s)\n", s)
+  fmt.Fprintf(&output, "fmt.Print(%s)\n", s)
 }
 
 
