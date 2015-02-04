@@ -273,7 +273,8 @@ func main() {
       fileSet := token.NewFileSet()
       source, error := parser.ParseFile(fileSet, "output", output.Bytes(), 0)
       if error == nil {
-        printer.Fprint(writer, fileSet, source)
+        config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
+        (&config).Fprint(writer, fileSet, source)
       } else {
         writer.Write(output.Bytes())
         writer.WriteString("\n----------\n")
