@@ -12,6 +12,7 @@ import (
   "go/token"
   "go/parser"
   "go/printer"
+  "go/ast"
 )
 
 const verbose bool = false
@@ -260,6 +261,7 @@ func emitRaw(s string) {
 func main() {
   writer := bufio.NewWriter(os.Stdout)
   defer writer.Flush()
+  log := os.Stderr
 
   numFiles := len(os.Args)-1
   if numFiles == 0 {
@@ -267,15 +269,52 @@ func main() {
     return
   }
   for argIx := 1; argIx <= numFiles; argIx++ {
+    // Parse the top-level template. The resulting source code goes into
+    //  a global variable called output, the type of which is bytes.Buffer.
     path := os.Args[argIx]
     error := parse(path)
     if error == nil {
+      // Use Go's parser on the code that came out of the template parser.
       fileSet := token.NewFileSet()
-      source, error := parser.ParseFile(fileSet, "output", output.Bytes(), 0)
+      fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
+          parser.ParseComments)
       if error == nil {
+        // If the Go parsing process was successful, it results in an
+        //  ast.File node. We're going to use this node for code injection
+        //  and eventually for printing.
+
+        // Scan the imported packages and check for fmt.
+        importSpecs := fileNode.Imports
+        fmtFound := false
+        for _, importSpec := range importSpecs {
+          path := importSpec.Path.Value
+          if path == "fmt" {
+            fmtFound = true
+            break
+          }
+        }
+        if !fmtFound {
+          fmt.Fprintf(log, "fmt not imported\n")
+          // If the fmt package was not imported, make a new ast.importSpec
+          //  node. We won't try to set accurate token positions because
+          //  we're only using the AST to print out new source code.
+          path := ast.BasicLit{ Kind: token.STRING, Value: "\"fmt\"" }
+          importSpec := ast.ImportSpec{ Path: &path }
+          importDecl := ast.GenDecl{
+            Tok: token.IMPORT,
+            Specs: []ast.Spec{ &importSpec },
+          }
+          fileNode.Decls = append(fileNode.Decls, nil)
+          copy(fileNode.Decls[1:], fileNode.Decls)
+          fileNode.Decls[0] = &importDecl
+        }
+
+        // Print with a custom configuration: soft tabs of two spaces each.
         config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
-        (&config).Fprint(writer, fileSet, source)
+        (&config).Fprint(writer, fileSet, fileNode)
       } else {
+        // If there was a Go parsing error, print our template-generated
+        //  source code, followed by the Go parser's error message.
         writer.Write(output.Bytes())
         writer.WriteString("\n----------\n")
         writer.WriteString(fmt.Sprintf("Go parsing error: %s\n", error))
