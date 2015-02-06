@@ -2,7 +2,7 @@ package main
 
 import (
   "os"
-  "fmt"
+  foo "fmt"
   "io"
   "bufio"
   "strings"
@@ -12,7 +12,7 @@ import (
   "go/token"
   "go/parser"
   "go/printer"
-  "go/ast"
+  "golang.org/x/tools/go/ast/astutil"
 )
 
 const verbose bool = false
@@ -279,35 +279,25 @@ func main() {
       fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
           parser.ParseComments)
       if error == nil {
-        // If the Go parsing process was successful, it results in an
-        //  ast.File node. We're going to use this node for code injection
-        //  and eventually for printing.
-
-        // Scan the imported packages and check for fmt.
-        importSpecs := fileNode.Imports
-        fmtFound := false
-        for _, importSpec := range importSpecs {
-          path := importSpec.Path.Value
-          if path == "fmt" {
-            fmtFound = true
-            break
-          }
-        }
-        if !fmtFound {
-          fmt.Fprintf(log, "fmt not imported\n")
-          // If the fmt package was not imported, make a new ast.importSpec
-          //  node. We won't try to set accurate token positions because
-          //  we're only using the AST to print out new source code.
-          path := ast.BasicLit{ Kind: token.STRING, Value: "\"fmt\"" }
-          importSpec := ast.ImportSpec{ Path: &path }
-          importDecl := ast.GenDecl{
-            Tok: token.IMPORT,
-            Specs: []ast.Spec{ &importSpec },
-          }
-          fileNode.Decls = append(fileNode.Decls, nil)
-          copy(fileNode.Decls[1:], fileNode.Decls)
-          fileNode.Decls[0] = &importDecl
-        }
+        // Before injecting an import statement, we have to check for
+        //  various collisions. The astutil.AddNameImport function only
+        //  checks for an import with the same path. There are more cases.
+        //  0. no import has the name or path "fmt":
+        //    import "fmt"
+        //  1. an import has the path "fmt" with a different name:
+        //    import "fmt"
+        //  2. an import has the name "fmt" with a different path:
+        //    import _fmt0 "fmt" (or _fmt1, ...) and write _fmt0.Printf
+        //  3. an import has the name and path "fmt":
+        //    do nothing
+        //  to inject an import statement. That function includes a 
+        //  import of fmt because astutil.AddImport includes such a check.
+        //  However, it does not check for aliased package names. We have
+        //  to do this ourselves. If there is a conflict, we correct it by
+        //  aliasing fmt to _fmt0 (or _fmt1, _fmt2, ...).
+        //  Hmm... what if fmt is imported but aliased to something else?
+        added := astutil.AddImport(fileSet, fileNode, "fmt")
+        fmt.Fprintf(log, "added: %t\n", added)
 
         // Print with a custom configuration: soft tabs of two spaces each.
         config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
