@@ -2,7 +2,7 @@ package main
 
 import (
   "os"
-  foo "fmt"
+  "fmt"
   "io"
   "bufio"
   "strings"
@@ -15,9 +15,19 @@ import (
   "golang.org/x/tools/go/ast/astutil"
 )
 
-const verbose bool = false
+var verbose bool = false
+var log *os.File = os.Stderr
 
-var output bytes.Buffer
+type Section struct {
+  Kind uint
+  Text string
+}
+const (
+  StaticSection uint = iota
+  CodeSection
+)
+
+var sections []*Section
 
 
 //--- Linear pattern matcher
@@ -116,7 +126,7 @@ func parse(templatePath string) error {
 func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
   current := stack[len(stack)-1]
   if verbose {
-    fmt.Fprintf(&output, "// start \"%s\"\n", current.SitePath)
+    fmt.Fprintf(log, "// start \"%s\"\n", current.SitePath)
   }
   var topLevel bool
   if len(stack) == 1 {
@@ -219,9 +229,9 @@ func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
     }
   }
   if verbose {
-    fmt.Fprintf(&output, "// finish \"%s\"\n", current.SitePath)
-    fmt.Fprintf(&output, "// read %d bytes, %d runes\n", countBytes, countRunes)
-    fmt.Fprintf(&output, "// finished on line %d\n", lineIndex)
+    fmt.Fprintf(log, "// finish \"%s\"\n", current.SitePath)
+    fmt.Fprintf(log, "// read %d bytes, %d runes\n", countBytes, countRunes)
+    fmt.Fprintf(log, "// finished on line %d\n", lineIndex)
   }
   if error == io.EOF {
     return nil
@@ -230,7 +240,7 @@ func doParse(siteRoot, startDir string, stack []*TemplateEntry) error {
 }
 
 func emitCode(content string) {
-  fmt.Fprint(&output, content)
+  sections = append(sections, &Section{ Kind: CodeSection, Text: content })
 }
 
 func emitStatic(content string) {
@@ -242,26 +252,25 @@ func emitStatic(content string) {
     if ch == '`' {
       if pos != from {
         raw := fmt.Sprintf("`%s`", content[from:pos])
-        emitRaw(raw)
+        emitStaticChunk(raw)
       }
-      emitRaw("'`'")
+      emitStaticChunk("'`'")
       from = pos+1
     }
   }
   if from != len(content) {
     raw := fmt.Sprintf("`%s`", content[from:len(content)])
-    emitRaw(raw)
+    emitStaticChunk(raw)
   }
 }
-func emitRaw(s string) {
-  fmt.Fprintf(&output, "fmt.Print(%s)\n", s)
+func emitStaticChunk(chunk string) {
+  sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
 }
 
 
 func main() {
   writer := bufio.NewWriter(os.Stdout)
   defer writer.Flush()
-  log := os.Stderr
 
   numFiles := len(os.Args)-1
   if numFiles == 0 {
@@ -270,11 +279,20 @@ func main() {
   }
   for argIx := 1; argIx <= numFiles; argIx++ {
     // Parse the top-level template. The resulting source code goes into
-    //  a global variable called output, the type of which is bytes.Buffer.
+    //  the global variable sections.
     path := os.Args[argIx]
     error := parse(path)
     if error == nil {
-      // Use Go's parser on the code that came out of the template parser.
+      // Concatenate the code sections and run them through the Go parser.
+      output := bytes.Buffer{}
+      for _, section := range sections {
+        if section.Kind == CodeSection {
+          fmt.Fprintf(&output, section.Text)
+        } else {
+          s := fmt.Sprintf(";fmt.Print(%s);", section.Text)
+          fmt.Fprintf(&output, s)
+        }
+      }
       fileSet := token.NewFileSet()
       fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
           parser.ParseComments)
@@ -296,8 +314,7 @@ func main() {
         //  to do this ourselves. If there is a conflict, we correct it by
         //  aliasing fmt to _fmt0 (or _fmt1, _fmt2, ...).
         //  Hmm... what if fmt is imported but aliased to something else?
-        added := astutil.AddImport(fileSet, fileNode, "fmt")
-        fmt.Fprintf(log, "added: %t\n", added)
+        astutil.AddImport(fileSet, fileNode, "fmt")
 
         // Print with a custom configuration: soft tabs of two spaces each.
         config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
