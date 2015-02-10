@@ -6,6 +6,8 @@ import (
   "io"
   "bufio"
   "strings"
+  "strconv"
+  "path"
   "path/filepath"
   "errors"
   "bytes"
@@ -280,8 +282,8 @@ func main() {
   for argIx := 1; argIx <= numFiles; argIx++ {
     // Parse the top-level template. The resulting source code goes into
     //  the global variable sections.
-    path := os.Args[argIx]
-    error := parse(path)
+    templatePath := os.Args[argIx]
+    error := parse(templatePath)
     if error == nil {
       // Concatenate the code sections and run them through the Go parser.
       output := bytes.Buffer{}
@@ -308,13 +310,35 @@ func main() {
         //    import _fmt0 "fmt" (or _fmt1, ...) and write _fmt0.Printf
         //  3. an import has the name and path "fmt":
         //    do nothing
-        //  to inject an import statement. That function includes a 
-        //  import of fmt because astutil.AddImport includes such a check.
-        //  However, it does not check for aliased package names. We have
-        //  to do this ourselves. If there is a conflict, we correct it by
-        //  aliasing fmt to _fmt0 (or _fmt1, _fmt2, ...).
-        //  Hmm... what if fmt is imported but aliased to something else?
-        astutil.AddImport(fileSet, fileNode, "fmt")
+        maxCollisionCase := 0
+        for _, importSpec := range fileNode.Imports {
+          importPath, _ := strconv.Unquote(importSpec.Path.Value)
+          var importName string
+          if importSpec.Name == nil {
+            importName = path.Base(importPath)
+          } else {
+            importName = importSpec.Name.Name
+          }
+          collisionCase := 0
+          if importPath == "fmt" {
+            if importName == "fmt" {
+              collisionCase = 3
+            } else {
+              collisionCase = 1
+            }
+          } else if importName == "fmt" {
+            collisionCase = 2
+          }
+          if collisionCase > maxCollisionCase {
+            maxCollisionCase = collisionCase
+          }
+        }
+
+        fmt.Fprintf(log, "maxCollisionCase: %d\n", maxCollisionCase)
+        if maxCollisionCase <= 1 {
+          astutil.AddImport(fileSet, fileNode, "fmt")
+        } else if maxCollisionCase == 2 {
+        }
 
         // Print with a custom configuration: soft tabs of two spaces each.
         config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
