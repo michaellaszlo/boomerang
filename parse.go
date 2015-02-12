@@ -269,7 +269,6 @@ func emitStaticChunk(chunk string) {
   sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
 }
 
-
 func main() {
   writer := bufio.NewWriter(os.Stdout)
   defer writer.Flush()
@@ -283,75 +282,102 @@ func main() {
     // Parse the top-level template. The resulting source code goes into
     //  the global variable sections.
     templatePath := os.Args[argIx]
+
+    // We parse the template to obtain code sections and static sections.
     error := parse(templatePath)
-    if error == nil {
-      // Concatenate the code sections and run them through the Go parser.
-      output := bytes.Buffer{}
-      for _, section := range sections {
-        if section.Kind == CodeSection {
-          fmt.Fprintf(&output, section.Text)
-        } else {
-          s := fmt.Sprintf(";fmt.Print(%s);", section.Text)
-          fmt.Fprintf(&output, s)
-        }
+    if error != nil {
+      writer.WriteString(fmt.Sprintf("Template parsing error: %s\n", error))
+      continue
+    }
+
+    // Concatenate only the code sections.
+    output := bytes.Buffer{}
+    for _, section := range sections {
+      if section.Kind == CodeSection {
+        fmt.Fprintf(&output, section.Text)
       }
-      fileSet := token.NewFileSet()
-      fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
-          parser.ParseComments)
-      if error == nil {
-        // Before injecting an import statement, we have to check for
-        //  various collisions. The astutil.AddNameImport function only
-        //  checks for an import with the same path. There are more cases.
-        //  0. no import has the name or path "fmt":
-        //    import "fmt"
-        //  1. an import has the path "fmt" with a different name:
-        //    import "fmt"
-        //  2. an import has the name "fmt" with a different path:
-        //    import _fmt0 "fmt" (or _fmt1, ...) and write _fmt0.Printf
-        //  3. an import has the name and path "fmt":
-        //    do nothing
-        maxCollisionCase := 0
-        for _, importSpec := range fileNode.Imports {
-          importPath, _ := strconv.Unquote(importSpec.Path.Value)
-          var importName string
-          if importSpec.Name == nil {
-            importName = path.Base(importPath)
-          } else {
-            importName = importSpec.Name.Name
-          }
-          collisionCase := 0
-          if importPath == "fmt" {
-            if importName == "fmt" {
-              collisionCase = 3
-            } else {
-              collisionCase = 1
-            }
-          } else if importName == "fmt" {
-            collisionCase = 2
-          }
-          if collisionCase > maxCollisionCase {
-            maxCollisionCase = collisionCase
-          }
-        }
+    }
+    fileSet := token.NewFileSet()
+    fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
+        parser.ParseComments)
+    if error != nil {
+      writer.Write(output.Bytes())
+      writer.WriteString(fmt.Sprintf(
+          "\n---\nError parsing code sections: %s\n", error))
+      continue
+    }
 
-        fmt.Fprintf(log, "maxCollisionCase: %d\n", maxCollisionCase)
-        if maxCollisionCase <= 1 {
-          astutil.AddImport(fileSet, fileNode, "fmt")
-        } else if maxCollisionCase == 2 {
-        }
+    //  Has the package fmt been imported? Is the name "fmt" available?
+    fmtIsImported := false
+    var fmtImportName string       // use this if fmt has already been imported
+    seenName := map[string]bool{}  // consult this if we have to import fmt
 
-        // Print with a custom configuration: soft tabs of two spaces each.
-        config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
-        (&config).Fprint(writer, fileSet, fileNode)
+    for _, importSpec := range fileNode.Imports {
+      importPath, _ := strconv.Unquote(importSpec.Path.Value)
+      var importName string
+      if importSpec.Name == nil {
+        importName = path.Base(importPath)
       } else {
-        // If there was a Go parsing error, print our template-generated
-        //  source code, followed by the Go parser's error message.
-        writer.Write(output.Bytes())
-        writer.WriteString("\n----------\n")
-        writer.WriteString(fmt.Sprintf("Go parsing error: %s\n", error))
+        importName = importSpec.Name.Name
+      }
+      seenName[importName] = true
+      if !fmtIsImported && importPath == "fmt" && importName != "_" {
+        fmtIsImported = true
+        fmtImportName = importName
+      }
+    }
+
+    var importAs, printPrefix string  // NB: these are "" by default
+    if fmtIsImported {
+      if fmtImportName != "." {  // no prefix is needed with a dot import
+        printPrefix = fmtImportName+"."
       }
     } else {
-      writer.WriteString(fmt.Sprintf("template parsing error: %s\n", error))
+      if !seenName["fmt"] {
+        importAs = "fmt"
+      } else {
+        for i := 0; ; i++ {
+          importAs = fmt.Sprintf("fmt_%d", i)
+          _, found := seenName[importAs]
+          if !found {
+            break
+          }
+        }
+      }
+      printPrefix = importAs+"."
     }
+
+    // Concatenate the code sections and static sections.
+    output.Reset()
+    for _, section := range sections {
+      if section.Kind == CodeSection {
+        fmt.Fprintf(&output, section.Text)
+      } else {
+        s := fmt.Sprintf(";%sPrint(%s);", printPrefix, section.Text)
+        fmt.Fprintf(&output, s)
+      }
+    }
+    // Have Go parse the entire template output.
+    fileSet = token.NewFileSet()
+    fileNode, error = parser.ParseFile(fileSet, "output", output.Bytes(),
+        parser.ParseComments)
+    if error != nil {
+      writer.Write(output.Bytes())
+      writer.WriteString(fmt.Sprintf(
+          "\n---\nError parsing entire template output: %s\n", error))
+      continue
+    }
+    // Finally, inject an import statement if necessary.
+    if !fmtIsImported {
+      if importAs == "fmt" {
+        astutil.AddImport(fileSet, fileNode, "fmt")
+      } else {
+        astutil.AddNamedImport(fileSet, fileNode, importAs, "fmt")
+      }
+    }
+
+    // Print with a custom configuration: soft tabs of two spaces each.
+    config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
+    (&config).Fprint(writer, fileSet, fileNode)
   }
 }
