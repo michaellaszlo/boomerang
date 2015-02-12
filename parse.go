@@ -1,3 +1,8 @@
+/*
+The executable "parse" takes one or more file names as arguments and
+calls the template processing function, processTemplate, on each one.
+*/
+
 package main
 
 import (
@@ -110,14 +115,16 @@ func makeHardPath(siteRoot, startDir, sitePath string) string {
 }
 
 func parse(templatePath string) error {
+  sections = []*Section{}
 
   // We resolve absolute paths with the website root.
   siteRoot := "/var/www/dd1"  // Stub. We'll get the real value from Apache.
   // We resolve relative paths using the starting directory.
   startDir := filepath.Dir(templatePath)
+  entryPoint := filepath.Base(templatePath)
 
   // Make an insertion stack with a top-level entry.
-  entry, error := makeTemplateEntry(siteRoot, startDir, templatePath, 0)
+  entry, error := makeTemplateEntry(siteRoot, startDir, entryPoint, 0)
   if error != nil {
     return error
   }
@@ -269,6 +276,109 @@ func emitStaticChunk(chunk string) {
   sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
 }
 
+func processTemplate(templatePath string, writer *bufio.Writer) {
+  // We parse the template to obtain code sections and static sections.
+  error := parse(templatePath)
+  if error != nil {
+    writer.WriteString(fmt.Sprintf("Template parsing error: %s\n", error))
+    return
+  }
+
+  // Concatenate only the code sections.
+  output := bytes.Buffer{}
+  for _, section := range sections {
+    if section.Kind == CodeSection {
+      fmt.Fprintf(&output, section.Text)
+    }
+  }
+  fileSet := token.NewFileSet()
+  fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
+      parser.ParseComments)
+  if error != nil {
+    writer.Write(output.Bytes())
+    writer.WriteString(fmt.Sprintf(
+        "\n---\nError parsing code sections: %s\n", error))
+    return
+  }
+
+  seekPath := "fmt"
+  seekName := path.Base(seekPath)
+  printCall := "Print"
+
+  //  Has the package been imported? Is the name available?
+  isImported := false
+  var importedAs string          // use this if the path has been imported
+  seenName := map[string]bool{}  // consult this if we have to import
+
+  for _, importSpec := range fileNode.Imports {
+    importPath, _ := strconv.Unquote(importSpec.Path.Value)
+    var importName string
+    if importSpec.Name == nil {
+      importName = path.Base(importPath)
+    } else {
+      importName = importSpec.Name.Name
+    }
+    seenName[importName] = true
+    if !isImported && importPath == seekPath && importName != "_" {
+      isImported = true
+      importedAs = importName
+    }
+  }
+
+  var importAs, printPrefix string  // NB: these are "" by default
+  if isImported {
+    if importedAs != "." {  // no prefix is needed with a dot import
+      printPrefix = importedAs+"."
+    }
+  } else {
+    if !seenName[seekName] {
+      importAs = seekName
+    } else {
+      for i := 0; ; i++ {
+        importAs = fmt.Sprintf("%s_%d", seekName, i)
+        _, found := seenName[importAs]
+        if !found {
+          break
+        }
+      }
+    }
+    printPrefix = importAs+"."
+  }
+
+  // Concatenate the code sections and static sections.
+  output.Reset()
+  for _, section := range sections {
+    if section.Kind == CodeSection {
+      fmt.Fprintf(&output, section.Text)
+    } else {
+      s := fmt.Sprintf(";%s%s(%s);", printPrefix, printCall, section.Text)
+      fmt.Fprintf(&output, s)
+    }
+  }
+  // Have Go parse the entire template output.
+  fileSet = token.NewFileSet()
+  fileNode, error = parser.ParseFile(fileSet, "output", output.Bytes(),
+      parser.ParseComments)
+  if error != nil {
+    writer.Write(output.Bytes())
+    writer.WriteString(fmt.Sprintf(
+        "\n---\nError parsing entire template output: %s\n", error))
+    return
+  }
+  // Finally, inject an import statement if necessary.
+  if !isImported {
+    if importAs == seekName {
+      astutil.AddImport(fileSet, fileNode, seekPath)
+    } else {
+      astutil.AddNamedImport(fileSet, fileNode, importAs, seekPath)
+    }
+  }
+
+  // Print with a custom configuration: soft tabs of two spaces each.
+  config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
+  (&config).Fprint(writer, fileSet, fileNode)
+}
+
 func main() {
   writer := bufio.NewWriter(os.Stdout)
   defer writer.Flush()
@@ -279,109 +389,7 @@ func main() {
     return
   }
   for argIx := 1; argIx <= numFiles; argIx++ {
-    // Parse the top-level template. The resulting source code goes into
-    //  the global variable sections.
-    templatePath := os.Args[argIx]
-
-    // We parse the template to obtain code sections and static sections.
-    error := parse(templatePath)
-    if error != nil {
-      writer.WriteString(fmt.Sprintf("Template parsing error: %s\n", error))
-      continue
-    }
-
-    // Concatenate only the code sections.
-    output := bytes.Buffer{}
-    for _, section := range sections {
-      if section.Kind == CodeSection {
-        fmt.Fprintf(&output, section.Text)
-      }
-    }
-    fileSet := token.NewFileSet()
-    fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
-        parser.ParseComments)
-    if error != nil {
-      writer.Write(output.Bytes())
-      writer.WriteString(fmt.Sprintf(
-          "\n---\nError parsing code sections: %s\n", error))
-      continue
-    }
-
-    seekPath := "fmt"
-    seekName := path.Base(seekPath)
-    printCall := "Print"
-
-    //  Has the package been imported? Is the name available?
-    isImported := false
-    var importedAs string          // use this if the path has been imported
-    seenName := map[string]bool{}  // consult this if we have to import
-
-    for _, importSpec := range fileNode.Imports {
-      importPath, _ := strconv.Unquote(importSpec.Path.Value)
-      var importName string
-      if importSpec.Name == nil {
-        importName = path.Base(importPath)
-      } else {
-        importName = importSpec.Name.Name
-      }
-      seenName[importName] = true
-      if !isImported && importPath == seekPath && importName != "_" {
-        isImported = true
-        importedAs = importName
-      }
-    }
-
-    var importAs, printPrefix string  // NB: these are "" by default
-    if isImported {
-      if importedAs != "." {  // no prefix is needed with a dot import
-        printPrefix = importedAs+"."
-      }
-    } else {
-      if !seenName[seekName] {
-        importAs = seekName
-      } else {
-        for i := 0; ; i++ {
-          importAs = fmt.Sprintf("%s_%d", seekName, i)
-          _, found := seenName[importAs]
-          if !found {
-            break
-          }
-        }
-      }
-      printPrefix = importAs+"."
-    }
-
-    // Concatenate the code sections and static sections.
-    output.Reset()
-    for _, section := range sections {
-      if section.Kind == CodeSection {
-        fmt.Fprintf(&output, section.Text)
-      } else {
-        s := fmt.Sprintf(";%s%s(%s);", printPrefix, printCall, section.Text)
-        fmt.Fprintf(&output, s)
-      }
-    }
-    // Have Go parse the entire template output.
-    fileSet = token.NewFileSet()
-    fileNode, error = parser.ParseFile(fileSet, "output", output.Bytes(),
-        parser.ParseComments)
-    if error != nil {
-      writer.Write(output.Bytes())
-      writer.WriteString(fmt.Sprintf(
-          "\n---\nError parsing entire template output: %s\n", error))
-      continue
-    }
-    // Finally, inject an import statement if necessary.
-    if !isImported {
-      if importAs == seekName {
-        astutil.AddImport(fileSet, fileNode, seekPath)
-      } else {
-        astutil.AddNamedImport(fileSet, fileNode, importAs, seekPath)
-      }
-    }
-
-    // Print with a custom configuration: soft tabs of two spaces each.
-    config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
-    (&config).Fprint(writer, fileSet, fileNode)
+    // Parse a top-level template.
+    processTemplate(os.Args[argIx], writer)
   }
 }
