@@ -307,10 +307,14 @@ func main() {
       continue
     }
 
-    //  Has the package fmt been imported? Is the name "fmt" available?
-    fmtIsImported := false
-    var fmtImportName string       // use this if fmt has already been imported
-    seenName := map[string]bool{}  // consult this if we have to import fmt
+    seekPath := "fmt"
+    seekName := path.Base(seekPath)
+    printCall := "Print"
+
+    //  Has the package been imported? Is the name available?
+    isImported := false
+    var importedAs string          // use this if the path has been imported
+    seenName := map[string]bool{}  // consult this if we have to import
 
     for _, importSpec := range fileNode.Imports {
       importPath, _ := strconv.Unquote(importSpec.Path.Value)
@@ -321,23 +325,23 @@ func main() {
         importName = importSpec.Name.Name
       }
       seenName[importName] = true
-      if !fmtIsImported && importPath == "fmt" && importName != "_" {
-        fmtIsImported = true
-        fmtImportName = importName
+      if !isImported && importPath == seekPath && importName != "_" {
+        isImported = true
+        importedAs = importName
       }
     }
 
     var importAs, printPrefix string  // NB: these are "" by default
-    if fmtIsImported {
-      if fmtImportName != "." {  // no prefix is needed with a dot import
-        printPrefix = fmtImportName+"."
+    if isImported {
+      if importedAs != "." {  // no prefix is needed with a dot import
+        printPrefix = importedAs+"."
       }
     } else {
-      if !seenName["fmt"] {
-        importAs = "fmt"
+      if !seenName[seekName] {
+        importAs = seekName
       } else {
         for i := 0; ; i++ {
-          importAs = fmt.Sprintf("fmt_%d", i)
+          importAs = fmt.Sprintf("%s_%d", seekName, i)
           _, found := seenName[importAs]
           if !found {
             break
@@ -353,7 +357,7 @@ func main() {
       if section.Kind == CodeSection {
         fmt.Fprintf(&output, section.Text)
       } else {
-        s := fmt.Sprintf(";%sPrint(%s);", printPrefix, section.Text)
+        s := fmt.Sprintf(";%s%s(%s);", printPrefix, printCall, section.Text)
         fmt.Fprintf(&output, s)
       }
     }
@@ -368,11 +372,11 @@ func main() {
       continue
     }
     // Finally, inject an import statement if necessary.
-    if !fmtIsImported {
-      if importAs == "fmt" {
-        astutil.AddImport(fileSet, fileNode, "fmt")
+    if !isImported {
+      if importAs == seekName {
+        astutil.AddImport(fileSet, fileNode, seekPath)
       } else {
-        astutil.AddNamedImport(fileSet, fileNode, importAs, "fmt")
+        astutil.AddNamedImport(fileSet, fileNode, importAs, seekPath)
       }
     }
 
