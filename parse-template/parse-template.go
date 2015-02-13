@@ -1,5 +1,5 @@
-// The executable "parse" takes one or more file names as arguments and
-//  calls the template processing function, processTemplate, on each one.
+// The executable "parse-template" takes one or more file names and
+//  calls processTemplate on each one.
 
 package main
 
