@@ -1,5 +1,5 @@
-// Package parsing implements template parsing and code generation.
-package parsing
+// Package apptemplate implements template parsing and code generation.
+package apptemplate
 
 import (
   "os"
@@ -22,7 +22,7 @@ var verbose bool = false
 var log *os.File = os.Stderr
 
 var sections []*Section     // Stores output sections during template parsing.
-var stack []*TemplateEntry  // Used to prevent template insertion cycles.
+var stack []*Entry  // Used to prevent template insertion cycles.
 
 // Section contains the text of a code section or static section.
 type Section struct {
@@ -66,31 +66,31 @@ func (pattern *Pattern) Next(ch rune) bool {
 
 //--- Template parsing and output generation
 
-// TemplateEntry contains path and file information about a template.
-type TemplateEntry struct {
+// Entry contains path and file information about a template.
+type Entry struct {
   SitePath, HardPath string  // The site path is relative to the site root,
   FileInfo os.FileInfo       // while the hard path is a physical path in
   InsertionLine int          // the file system. A child template begins
 }                            // at an insertion line of a parent template.
 
-// String implements the fmt.Stringer interface for TemplateEntry.
-func (entry TemplateEntry) String() string {
+// String implements the fmt.Stringer interface for Entry.
+func (entry Entry) String() string {
   if entry.InsertionLine == 0 {
     return entry.SitePath
   }
   return fmt.Sprintf("-> line %d: %s", entry.InsertionLine, entry.SitePath)
 }
 
-// MakeTemplateEntry fills in every field of a TemplateEntry, generating
+// MakeEntry fills in every field of an Entry, generating
 // the hard path and file info based on the details of the site path.
-func MakeTemplateEntry(siteRoot, startDir, sitePath string,
-    insertionLine int) (*TemplateEntry, error) {
+func MakeEntry(siteRoot, startDir, sitePath string,
+    insertionLine int) (*Entry, error) {
   hardPath := MakeHardPath(siteRoot, startDir, sitePath)
   fileInfo, error := os.Stat(hardPath)
   if error != nil {
     return nil, error
   }
-  entry := TemplateEntry{
+  entry := Entry{
       SitePath: sitePath,
       HardPath: hardPath,
       FileInfo: fileInfo,
@@ -122,12 +122,12 @@ func parse(siteRoot, templatePath string) error {
   startDir := filepath.Dir(templatePath)
   entryPoint := filepath.Base(templatePath)
   // Make an insertion stack with a top-level entry.
-  entry, error := MakeTemplateEntry(siteRoot, startDir, entryPoint, 0)
+  entry, error := MakeEntry(siteRoot, startDir, entryPoint, 0)
   if error != nil {
     return error
   }
   sections = []*Section{}
-  stack = []*TemplateEntry{ entry }
+  stack = []*Entry{ entry }
   return doParse(siteRoot, startDir)
 }
 
@@ -224,7 +224,7 @@ func doParse(siteRoot, startDir string) error {
           emitCode(string(content))
         } else if open == &insertPattern {  // Insertion requires more work.
           childPath := strings.TrimSpace(string(content))
-          entry, error := MakeTemplateEntry(siteRoot, startDir, childPath,
+          entry, error := MakeEntry(siteRoot, startDir, childPath,
               lineIndex)                    // We have to push a new template
           if error != nil {                 // entry onto the stack and make
             return error                    // a recursive call.
@@ -258,7 +258,7 @@ func emitCode(content string) {
 }
 
 // emitStatic breaks a string into back-quoted strings and back quotes,
-// calling emitStaticChunk for each one. 
+// calling doEmitStatic for each one. 
 func emitStatic(content string) {
   if len(content) == 0 {
     return
@@ -268,26 +268,26 @@ func emitStatic(content string) {
     if ch == '`' {
       if pos != from {
         raw := fmt.Sprintf("`%s`", content[from:pos])
-        emitStaticChunk(raw)
+        doEmitStatic(raw)
       }
-      emitStaticChunk("'`'")
+      doEmitStatic("'`'")
       from = pos+1
     }
   }
   if from != len(content) {
     raw := fmt.Sprintf("`%s`", content[from:len(content)])
-    emitStaticChunk(raw)
+    doEmitStatic(raw)
   }
 }
-// emitStaticChunk makes a static section and adds it to the global sections.
-func emitStaticChunk(chunk string) {
+// doEmitStatic makes a static section and adds it to the global sections.
+func doEmitStatic(chunk string) {
   sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
 }
 
-// ProcessTemplate is the top-level template parsing function. It calls
+// Process is the top-level template parsing function. It calls
 // parse, then glues the sections together and injects an import statement
 // as needed. The final result is printed to the global writer. 
-func ProcessTemplate(siteRoot, templatePath string, writer *bufio.Writer) {
+func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   // We parse the template to obtain code sections and static sections.
   error := parse(siteRoot, templatePath)
   if error != nil {

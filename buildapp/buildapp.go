@@ -1,11 +1,11 @@
-// The command parse-template takes one or more file names and
-// calls parsing.processTemplate on each one.
+// The buildapp command takes one or more file names and
+// calls apptemplate.Process on each one.
 package main
 
 import (
   "bufio"
   "os"
-  "go-web-weaver/parsing"
+  "boomerang/apptemplate"
 )
 
 func main() {
@@ -22,6 +22,6 @@ func main() {
   }
   for argIx := 1; argIx <= numFiles; argIx++ {
     // Parse a top-level template.
-    parsing.ProcessTemplate(siteRoot, os.Args[argIx], writer)
+    apptemplate.Process(siteRoot, os.Args[argIx], writer)
   }
 }
