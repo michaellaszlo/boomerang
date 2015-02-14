@@ -5,7 +5,7 @@ package main
 import (
   "bufio"
   "os"
-  "boomerang/apptemplate"
+  "github.com/michaellaszlo/boomerang/apptemplate"
 )
 
 func main() {
