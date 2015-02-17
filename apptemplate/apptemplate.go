@@ -18,8 +18,8 @@ import (
   "golang.org/x/tools/go/ast/astutil"
 )
 
-var verbose bool = false
-var log *os.File = os.Stderr
+var verbose = false
+var log = os.Stderr
 
 var sections []*Section     // Stores output sections during template parsing.
 var stack []*Entry  // Used to prevent template insertion cycles.
@@ -29,7 +29,7 @@ type Section struct {
   Kind uint
   Text string
 }
-const (
+const (  // These are Section.Kind values.
   StaticSection uint = iota
   CodeSection
 )
@@ -137,10 +137,6 @@ func doParse(siteRoot, startDir string) error {
   if verbose {
     fmt.Fprintf(log, "// start \"%s\"\n", current.SitePath)
   }
-  var topLevel bool
-  if len(stack) == 1 {
-    topLevel = true
-  }
 
   // Check for an insertion cycle.
   for i := len(stack)-2; i >= 0; i-- {
@@ -178,24 +174,20 @@ func doParse(siteRoot, startDir string) error {
   var buffer []rune
   var ch rune
   var size int
-  countBytes, countRunes := 0, 0  // Byte and rune counts only appear in log
-  lineIndex := 1                  // messages. We store the line index in
-  prefix := true                  // template entries for debugging purposes.
+  countBytes, countRunes := 0, 0  // Byte and rune counts are logged.
+  lineIndex := 1  // The line index is stored in template entries.
 
   for {
     ch, size, error = reader.ReadRune()
     if error == nil {
       buffer = append(buffer, ch)
       countBytes += size
-      countRunes += 1
+      countRunes++
       if ch == '\n' {
-        lineIndex += 1
+        lineIndex++
       }
     } else {               // We assume that the read failed due to EOF.
       content := string(buffer)
-      if topLevel {        // Trim the end of the top-level template.
-        content = strings.TrimSpace(content)
-      }
       emitStatic(content)
       break
     }
@@ -207,12 +199,6 @@ func doParse(siteRoot, startDir string) error {
         if pattern.Next(ch) {
           open = pattern
           content := string(buffer[0:len(buffer)-open.Length])  // Remove tag.
-          if prefix {
-            if topLevel {  // Trim the start of the top-level template.
-              content = strings.TrimSpace(content)
-            }
-            prefix = false
-          }
           emitStatic(content)  // Text before an opening tag must be static.
           buffer = []rune{}
         }
@@ -364,7 +350,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     if section.Kind == CodeSection {
       fmt.Fprintf(&output, section.Text)
     } else {
-      s := fmt.Sprintf(";%s%s(%s);", printPrefix, printCall, section.Text)
+      s := fmt.Sprintf(";%s%s(%s);\n", printPrefix, printCall, section.Text)
       fmt.Fprintf(&output, s)
     }
   }
