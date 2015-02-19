@@ -12,6 +12,7 @@ import (
   "path/filepath"
   "errors"
   "bytes"
+  "unicode"
   "go/token"
   "go/parser"
   "go/printer"
@@ -188,7 +189,7 @@ func doParse(siteRoot, startDir string) error {
       }
     } else {               // We assume that the read failed due to EOF.
       content := string(buffer)
-      emitStatic(content)
+      pushStatic(content)
       break
     }
 
@@ -198,16 +199,16 @@ func doParse(siteRoot, startDir string) error {
       for _, pattern := range openPatterns {
         if pattern.Next(ch) {
           open = pattern
-          content := string(buffer[0:len(buffer)-open.Length])  // Remove tag.
-          emitStatic(content)  // Text before an opening tag must be static.
+          content := string(buffer[:len(buffer)-open.Length])  // Remove tag.
+          pushStatic(content)  // Text before an opening tag must be static.
           buffer = []rune{}
         }
       }
     } else {
       if close.Next(ch) {
-        content := buffer[0:len(buffer)-close.Length]  // Remove tag.
+        content := buffer[:len(buffer)-close.Length]  // Remove tag.
         if open == &codePattern {           // Code sections are just text.
-          emitCode(string(content))
+          pushCode(string(content))
         } else if open == &insertPattern {  // Insertion requires more work.
           childPath := strings.TrimSpace(string(content))
           entry, error := MakeEntry(siteRoot, startDir, childPath,
@@ -220,7 +221,7 @@ func doParse(siteRoot, startDir string) error {
           if error != nil {
             return error
           }
-          stack = stack[0:len(stack)-1]
+          stack = stack[:len(stack)-1]
         }
         open = nil
         buffer = []rune{}
@@ -238,36 +239,33 @@ func doParse(siteRoot, startDir string) error {
   return error
 }
 
-// emitCode makes a code section and adds it to the global sections.
-func emitCode(content string) {
+// pushCode makes a code section and adds it to the global sections.
+func pushCode(content string) {
   sections = append(sections, &Section{ Kind: CodeSection, Text: content })
 }
 
-// emitStatic breaks a string into back-quoted strings and back quotes,
-// calling doEmitStatic for each one. 
-func emitStatic(content string) {
-  if len(content) == 0 {
-    return
-  }
+// pushStatic makes a static section and adds it to the global sections.
+func pushStatic(chunk string) {
+  sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
+}
+
+// makeRawStrings splits a string into back-quoted strings and back quotes.
+func makeRawStrings(content string) (pieces []string) {
+  pieces = []string{}
   from := 0
   for pos, ch := range content {
     if ch == '`' {
       if pos != from {
-        raw := fmt.Sprintf("`%s`", content[from:pos])
-        doEmitStatic(raw)
+        pieces = append(pieces, fmt.Sprintf("`%s`", content[from:pos]))
       }
-      doEmitStatic("'`'")
+      pieces = append(pieces, "'`'")
       from = pos+1
     }
   }
   if from != len(content) {
-    raw := fmt.Sprintf("`%s`", content[from:len(content)])
-    doEmitStatic(raw)
+    pieces = append(pieces, fmt.Sprintf("`%s`", content[from:]))
   }
-}
-// doEmitStatic makes a static section and adds it to the global sections.
-func doEmitStatic(chunk string) {
-  sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
+  return
 }
 
 // Process is the top-level template parsing function. It calls
@@ -280,6 +278,36 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     writer.WriteString(fmt.Sprintf("Template parsing error: %s\n", error))
     return
   }
+
+  // Left-trim whitespace from any static text before code.
+  for {
+    section := sections[0]
+    if section.Kind == CodeSection {
+      break
+    }
+    text := section.Text
+    firstNonSpace := -1
+    for i, ch := range text {
+      if !unicode.IsSpace(ch) {
+        firstNonSpace = i
+        break
+      }
+    }
+    if firstNonSpace == -1 {  // Delete the leftmost section.
+      sections = sections[1:]
+      if len(sections) == 0 {
+        break
+      }
+    } else {                  // Left-trim the leftmost section
+      section.Text = text[firstNonSpace:]
+      break
+    }
+  }
+
+  // Right-trim whitespace from any static text after code.
+
+  // Merge consecutive static sections.
+
 
   // Concatenate only the code sections. We're not adding print statements yet
   // because we don't know what the print command is going to look like. We
@@ -350,8 +378,11 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     if section.Kind == CodeSection {
       fmt.Fprintf(&output, section.Text)
     } else {
-      s := fmt.Sprintf(";%s%s(%s);\n", printPrefix, printCall, section.Text)
-      fmt.Fprintf(&output, s)
+      pieces := makeRawStrings(section.Text)
+      for _, piece := range pieces {
+        s := fmt.Sprintf(";%s%s(%s);\n", printPrefix, printCall, piece)
+        fmt.Fprintf(&output, s)
+      }
     }
   }
   // Have Go parse the whole output in preparation for import injection
