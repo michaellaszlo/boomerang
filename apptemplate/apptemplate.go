@@ -306,6 +306,28 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     sections = sections[:len(sections)-1]
   }
 
+  // If desired, concatenate consecutive static sections.
+  if MergeStaticText {
+    newSections := []*Section{}
+    n := len(sections)
+    for pos := 0; pos < n; pos++ {
+      section := sections[pos]
+      if section.Kind == Code || pos+1 == n || sections[pos+1].Kind == Code {
+        newSections = append(newSections, section)
+        continue
+      }
+      substrings := []string{}
+      var seek int
+      for seek = pos; seek < n && sections[seek].Kind == Static; seek++ {
+        substrings = append(substrings, sections[seek].Text)
+      }
+      section.Text = strings.Join(substrings, "")
+      newSections = append(newSections, section)
+      pos = seek-1
+    }
+    sections = newSections
+  }
+
   // Concatenate only the code sections. We're not adding print statements yet
   // because we don't know what the print command is going to look like. We
   // do want to parse the user's code in order to scan the imports.
