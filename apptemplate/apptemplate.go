@@ -12,7 +12,6 @@ import (
   "path/filepath"
   "errors"
   "bytes"
-  "unicode"
   "go/token"
   "go/parser"
   "go/printer"
@@ -21,6 +20,8 @@ import (
 
 var verbose = false
 var log = os.Stderr
+
+var MergeStaticText = true  // Concatenate consecutive static sections?
 
 var sections []*Section     // Stores output sections during template parsing.
 var stack []*Entry  // Used to prevent template insertion cycles.
@@ -31,8 +32,8 @@ type Section struct {
   Text string
 }
 const (  // These are Section.Kind values.
-  StaticSection uint = iota
-  CodeSection
+  Static uint = iota
+  Code
 )
 
 
@@ -241,12 +242,12 @@ func doParse(siteRoot, startDir string) error {
 
 // pushCode makes a code section and adds it to the global sections.
 func pushCode(content string) {
-  sections = append(sections, &Section{ Kind: CodeSection, Text: content })
+  sections = append(sections, &Section{ Kind: Code, Text: content })
 }
 
 // pushStatic makes a static section and adds it to the global sections.
 func pushStatic(chunk string) {
-  sections = append(sections, &Section{ Kind: StaticSection, Text: chunk })
+  sections = append(sections, &Section{ Kind: Static, Text: chunk })
 }
 
 // makeRawStrings splits a string into back-quoted strings and back quotes.
@@ -279,42 +280,38 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     return
   }
 
-  // Left-trim whitespace from any static text before code.
-  for {
+  // Discard whitespace sections before the first code section.
+  for len(sections) != 0 {
     section := sections[0]
-    if section.Kind == CodeSection {
+    if section.Kind == Code {
       break
     }
-    text := section.Text
-    firstNonSpace := -1
-    for i, ch := range text {
-      if !unicode.IsSpace(ch) {
-        firstNonSpace = i
-        break
-      }
-    }
-    if firstNonSpace == -1 {  // Delete the leftmost section.
-      sections = sections[1:]
-      if len(sections) == 0 {
-        break
-      }
-    } else {                  // Left-trim the leftmost section
-      section.Text = text[firstNonSpace:]
+    text := strings.TrimSpace(section.Text)
+    if len(text) != 0 {
       break
     }
+    sections = sections[1:]
   }
 
-  // Right-trim whitespace from any static text after code.
-
-  // Merge consecutive static sections.
-
+  // Discard whitespace sections after the last code section.
+  for len(sections) != 0 {
+    section := sections[len(sections)-1]
+    if section.Kind == Code {
+      break
+    }
+    text := strings.TrimSpace(section.Text)
+    if len(text) != 0 {
+      break
+    }
+    sections = sections[:len(sections)-1]
+  }
 
   // Concatenate only the code sections. We're not adding print statements yet
   // because we don't know what the print command is going to look like. We
   // do want to parse the user's code in order to scan the imports.
   output := bytes.Buffer{}
   for _, section := range sections {
-    if section.Kind == CodeSection {
+    if section.Kind == Code {
       fmt.Fprintf(&output, section.Text)
     }
   }
@@ -375,7 +372,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   // Concatenate the code with static sections wrapped in print statements.
   output.Reset()
   for _, section := range sections {
-    if section.Kind == CodeSection {
+    if section.Kind == Code {
       fmt.Fprintf(&output, section.Text)
     } else {
       pieces := makeRawStrings(section.Text)
