@@ -7,6 +7,7 @@ import (
   "io"
   "bufio"
   "strings"
+  "unicode"
   "strconv"
   "path"
   "path/filepath"
@@ -70,74 +71,54 @@ func (pattern *Pattern) Next(ch rune) bool {
 
 // Entry contains path and file information about a template.
 type Entry struct {
-  SitePath, HardPath string  // The site path is relative to the site root,
-  FileInfo os.FileInfo       // while the hard path is a physical path in
-  InsertionLine int          // the file system. A child template begins
-}                            // at an insertion line of a parent template.
+  GivenPath, HardPath string  // GivenPath was passed to buildapp or insert.
+  FileInfo os.FileInfo        // HardPath is an absolute file-system path.
+  InsertionLine int           // InsertionLine is a line number in the parent.
+}
 
 // String implements the fmt.Stringer interface for Entry.
 func (entry Entry) String() string {
   if entry.InsertionLine == 0 {
-    return entry.SitePath
+    return entry.GivenPath
   }
-  return fmt.Sprintf("-> line %d: %s", entry.InsertionLine, entry.SitePath)
-}
-
-// MakeEntry fills in every field of an Entry, generating
-// the hard path and file info based on the details of the site path.
-func MakeEntry(siteRoot, startDir, sitePath string,
-    insertionLine int) (*Entry, error) {
-  hardPath := MakeHardPath(siteRoot, startDir, sitePath)
-  fileInfo, error := os.Stat(hardPath)
-  if error != nil {
-    return nil, error
-  }
-  entry := Entry{
-      SitePath: sitePath,
-      HardPath: hardPath,
-      FileInfo: fileInfo,
-      InsertionLine: insertionLine,
-    }
-  return &entry, nil
-}
-
-// MakeHardPath uses the details of the site path to make a hard path.
-// A hard path names a location in the physical file system rather than
-// in the website's directory structure. It is either an absolute path
-// or a relative path with respect to the starting directory, which is
-// where the top-level template is located.
-func MakeHardPath(siteRoot, startDir, sitePath string) string {
-  var dir string
-  if filepath.IsAbs(sitePath) {
-    dir = siteRoot
-  } else {
-    dir = startDir
-  }
-  hardPath := filepath.Join(dir, sitePath)
-  return hardPath
+  return fmt.Sprintf("-> line %d: %s", entry.InsertionLine, entry.GivenPath)
 }
 
 // parse makes an entry for the top-level template, initializes the section
 // list and the parsing stack, and calls doParse.
 func parse(siteRoot, templatePath string) error {
-  // We resolve relative paths using the starting directory.
-  startDir := filepath.Dir(templatePath)
-  entryPoint := filepath.Base(templatePath)
-  // Make an insertion stack with a top-level entry.
-  entry, error := MakeEntry(siteRoot, startDir, entryPoint, 0)
+  fileInfo, error := os.Stat(templatePath)
   if error != nil {
     return error
   }
+  // Work out the name of the containing directory. This becomes templateDir,
+  // which will be used to resolve relative paths for inserted templates.
+  templateDir := filepath.Dir(templatePath)
+  if !filepath.IsAbs(templatePath) {  // We want an absolute file-system path.
+    workingDirectory, error := os.Getwd()
+    if error != nil {
+      return error
+    }
+    templateDir = filepath.Join(workingDirectory, templateDir)
+  }
+  hardPath := filepath.Join(templateDir, filepath.Base(templatePath))
+  // Make an insertion stack with an entry for the top-level template.
+  entry := Entry{
+      GivenPath: templatePath,
+      HardPath: hardPath,
+      FileInfo: fileInfo,
+      InsertionLine: 0,
+    }
   sections = []*Section{}
-  stack = []*Entry{ entry }
-  return doParse(siteRoot, startDir)
+  stack = []*Entry{ &entry }
+  return doParse(siteRoot, templateDir)
 }
 
 // doParse recursively parses a template and its children.
-func doParse(siteRoot, startDir string) error {
+func doParse(siteRoot, templateDir string) error {
   current := stack[len(stack)-1]
   if verbose {
-    fmt.Fprintf(log, "// start \"%s\"\n", current.SitePath)
+    fmt.Fprintf(log, "// start \"%s\"\n", current.GivenPath)
   }
 
   // Check for an insertion cycle.
@@ -211,14 +192,31 @@ func doParse(siteRoot, startDir string) error {
         if open == &codePattern {           // Code sections are just text.
           pushCode(string(content))
         } else if open == &insertPattern {  // Insertion requires more work.
-          childPath := strings.TrimSpace(string(content))
-          entry, error := MakeEntry(siteRoot, startDir, childPath,
-              lineIndex)                    // We have to push a new template
-          if error != nil {                 // entry onto the stack and make
-            return error                    // a recursive call.
+          givenPath := strings.TrimSpace(string(content))
+          // Convert the given path into a hard path.
+          // Absolute given path: consult the site root.
+          // Relative given path: consult the current template directory.
+          var hardDir string
+          if path.IsAbs(givenPath) {
+            hardDir = siteRoot
+          } else {
+            hardDir = templateDir
           }
-          stack = append(stack, entry)
-          error = doParse(siteRoot, startDir)
+          hardPath := filepath.Join(hardDir, givenPath)
+          fileInfo, error := os.Stat(hardPath)
+          if error != nil {
+            return error
+          }
+          entry := Entry{
+              GivenPath: givenPath,
+              HardPath: hardPath,
+              FileInfo: fileInfo,
+              InsertionLine: lineIndex,
+            }
+          // Push the new entry onto the stack and make a recursive call.
+          stack = append(stack, &entry)
+          childTemplateDir := filepath.Dir(hardPath)
+          error = doParse(siteRoot, childTemplateDir)
           if error != nil {
             return error
           }
@@ -230,7 +228,7 @@ func doParse(siteRoot, startDir string) error {
     }
   }
   if verbose {
-    fmt.Fprintf(log, "parsed \"%s\"\n", current.SitePath)
+    fmt.Fprintf(log, "parsed \"%s\"\n", current.GivenPath)
     fmt.Fprintf(log, "read %d bytes, %d runes\n", countBytes, countRunes)
     fmt.Fprintf(log, "finished on line %d\n", lineIndex)
   }
@@ -273,7 +271,7 @@ func makeRawStrings(content string) (pieces []string) {
 // parse, then glues the sections together and injects an import statement
 // as needed. The final result is printed to the global writer. 
 func Process(siteRoot, templatePath string, writer *bufio.Writer) {
-  // We parse the template to obtain code sections and static sections.
+  // Parse the template to obtain code sections and static sections.
   error := parse(siteRoot, templatePath)
   if error != nil {
     writer.WriteString(fmt.Sprintf("Template parsing error: %s\n", error))
@@ -306,6 +304,44 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     sections = sections[:len(sections)-1]
   }
 
+  // Take care of initial and final whitespace within the code sections.
+  // Find the first and last code sections.
+  codeLeft, codeRight := -1, -1
+  for i, section := range sections {
+    if section.Kind == Code {
+      codeLeft = i
+      break
+    }
+  }
+  for i := len(sections)-1; i >= 0; i-- {
+    if sections[i].Kind == Code {
+      codeRight = i
+      break
+    }
+  }
+  // Between these code sections, left-trim the initial static sections and
+  //  right-trim the final static sections.
+  for i := codeLeft+1; i < codeRight; i++ {
+    if sections[i].Kind == Static {
+      sections[i].Text = strings.TrimLeftFunc(sections[i].Text,
+          unicode.IsSpace)
+      if len(sections[i].Text) != 0 {  // Continue trimming until the
+        break                          // resulting section is non-empty. 
+      }
+    }
+  }
+  for i := codeRight-1; i > codeLeft; i-- {
+    if sections[i].Kind == Static {
+      sections[i].Text = strings.TrimRightFunc(sections[i].Text,
+          unicode.IsSpace)
+      if len(sections[i].Text) != 0 {  // Continue trimming until non-empty.
+        // Add a newline to the final static section.
+        sections[i].Text += "\n"
+        break
+      }
+    }
+  }
+
   // If desired, concatenate consecutive static sections.
   if MergeStaticText {
     newSections := []*Section{}
@@ -327,6 +363,16 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     }
     sections = newSections
   }
+
+  // Discard code and static sections that consist entirely of whitespace.
+  newSections := []*Section{}
+  for _, section := range sections {
+    trimmed := strings.TrimFunc(section.Text, unicode.IsSpace)
+    if len(trimmed) != 0 {
+      newSections = append(newSections, section)
+    }
+  }
+  sections = newSections
 
   // Concatenate only the code sections. We're not adding print statements yet
   // because we don't know what the print command is going to look like. We
@@ -399,7 +445,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     } else {
       pieces := makeRawStrings(section.Text)
       for _, piece := range pieces {
-        s := fmt.Sprintf(";%s%s(%s);\n", printPrefix, printCall, piece)
+        s := fmt.Sprintf(";%s%s(%s);", printPrefix, printCall, piece)
         fmt.Fprintf(&output, s)
       }
     }
