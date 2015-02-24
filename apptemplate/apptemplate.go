@@ -126,7 +126,7 @@ func doParse(siteRoot, templateDir string) error {
     ancestor := stack[i]
     if os.SameFile(ancestor.FileInfo, current.FileInfo) {
       lines := []string{ "doParse: insertion cycle" }
-      for j := i; j < len(stack); j++ {           // In the event of a cycle,
+      for j := 0; j < len(stack); j++ {           // In the event of a cycle,
         lines = append(lines, stack[j].String())  // generate a stack trace.
       }
       message := fmt.Sprintf(strings.Join(lines, "\n  "))

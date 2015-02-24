@@ -1,0 +1,33 @@
+
+a. No imports at all.
+  import "fmt"
+
+b. A package other than fmt is imported.
+  import "fmt"
+
+c. fmt is imported.
+  nothing
+
+d. fmt is imported as foo.
+  foo.Print
+
+e. fmt is imported as foo and imported normally.
+  foo.Print
+
+f. A package other than fmt is imported as fmt, and fmt is imported as foo.
+  foo.Print
+
+g. A package other than fmt is imported as fmt, and fmt is not imported.
+  import fmt_0 "fmt"
+  fmt_0.Print
+
+h. A package other than fmt is imported as fmt, fmt is not, and fmt_0 is used.
+  import fmt_1 "fmt"
+  fmt_1.Print
+
+i. fmt is imported with a dot
+  Print
+
+j. fmt is only imported with an underscore
+  treat fmt as not imported
+

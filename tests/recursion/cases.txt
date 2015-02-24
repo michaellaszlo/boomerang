@@ -1,0 +1,27 @@
+
+Testing goals:
+- five kinds of insertion arguments
+  - relative path
+  - absolute path
+  - .
+  - ..
+  - symlink
+- insertion within a Go if block
+- cycle detection
+
+
+0.correct*
+  insert a/1.correct.html                       relative
+    insert /a/b/c/3.correct.html                absolute
+      insert ./d/4.correct.html                 relative, .
+        .abs: insert /a/b/2.correct.html        absolute, if-then
+        .rel: ../../2.correct.html              relative, .., if-else
+
+0.incorrect*
+  insert a/1.incorrect.html                     relative
+    insert /ab/2.incorrect.html                 absolute, symlink
+      insert /a/b/c/3.incorrect.html            absolute
+        ../c/./d/4.incorrect.html               relative, ., ..
+          .abs: insert /a/b/2.incorrect.html    absolute, if-then
+          .rel: insert ../../2.incorrect.html   relative, .., if-else
+
