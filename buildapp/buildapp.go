@@ -5,6 +5,7 @@ package main
 import (
   "bufio"
   "os"
+  "strings"
   "github.com/michaellaszlo/boomerang/apptemplate"
 )
 
@@ -12,16 +13,26 @@ func main() {
   writer := bufio.NewWriter(os.Stdout)
   defer writer.Flush()
 
-  // We resolve absolute paths by consulting the website root.
-  siteRoot := "/var/www/dd1"  // Stub. We'll get the real value from Apache.
+  // Absolute template paths are resolved relative to the site root.
+  // A running app can ask Apache for this value. The app builder cannot.
+  siteRoot, error := os.Getwd()
+  if error != nil {
+    writer.WriteString(error.Error())
+    return
+  }
 
-  numFiles := len(os.Args)-1
-  if numFiles == 0 {
+  if len(os.Args) == 1  {
     writer.WriteString("No files specified.\n")
     return
   }
-  for argIx := 1; argIx <= numFiles; argIx++ {
+  for i := 1; i < len(os.Args); i++ {
+    arg := os.Args[i]
+    // Minimal switch parsing.
+    if strings.Index(arg, "-root=") == 0 {
+      siteRoot = arg[6:]  // The root switch affects arguments that follow it.
+      continue
+    }
     // Parse a top-level template.
-    apptemplate.Process(siteRoot, os.Args[argIx], writer)
+    apptemplate.Process(siteRoot, os.Args[i], writer)
   }
-}
+} 
