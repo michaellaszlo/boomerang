@@ -342,7 +342,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     }
   }
 
-  // If desired, concatenate consecutive static sections.
+  // Concatenate consecutive static sections if desired.
   if MergeStaticText {
     newSections := []*Section{}
     n := len(sections)
