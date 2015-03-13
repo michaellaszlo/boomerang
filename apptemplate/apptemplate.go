@@ -269,12 +269,14 @@ func makeRawStrings(content string) (pieces []string) {
 
 // Process is the top-level template parsing function. It calls
 // parse, then glues the sections together and injects an import statement
-// as needed. The final result is printed to the global writer. 
+// as needed. The final result is printed to a buffered writer.
 func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   // Parse the template to obtain code sections and static sections.
   error := parse(siteRoot, templatePath)
   if error != nil {
-    writer.WriteString(fmt.Sprintf("Template parsing error: %s\n", error))
+    message := fmt.Sprintf("Template parsing error: %s\n", error)
+    fmt.Fprint(os.Stderr, message)
+    writer.WriteString(message)
     return
   }
 
@@ -387,9 +389,10 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
   if error != nil {
-    writer.Write(output.Bytes())
-    writer.WriteString(fmt.Sprintf(
-        "\n---\nError parsing code sections: %s\n", error))
+    message := fmt.Sprintf("%s\n---\nError parsing code sections: %s\n",
+        output.Bytes(), error)
+    fmt.Fprint(os.Stderr, message)
+    writer.WriteString(message)
     return
   }
 
@@ -456,9 +459,10 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   fileNode, error = parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
   if error != nil {
-    writer.Write(output.Bytes())
-    writer.WriteString(fmt.Sprintf(
-        "\n---\nError parsing entire template output: %s\n", error))
+    message := fmt.Sprintf("%s\n---\nError parsing template output: %s\n",
+        output.Bytes(), error)
+    fmt.Fprint(os.Stderr, message)
+    writer.WriteString(message)
     return
   }
   // Inject an import statement if necessary.
