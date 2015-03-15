@@ -87,17 +87,17 @@ func (entry Entry) String() string {
 // parse makes an entry for the top-level template, initializes the section
 // list and the parsing stack, and calls doParse.
 func parse(siteRoot, templatePath string) error {
-  fileInfo, error := os.Stat(templatePath)
-  if error != nil {
-    return error
+  fileInfo, err := os.Stat(templatePath)
+  if err != nil {
+    return err
   }
   // Work out the name of the containing directory. This becomes templateDir,
   // which will be used to resolve relative paths for inserted templates.
   templateDir := filepath.Dir(templatePath)
   if !filepath.IsAbs(templatePath) {  // We want an absolute file-system path.
-    workingDirectory, error := os.Getwd()
-    if error != nil {
-      return error
+    workingDirectory, err := os.Getwd()
+    if err != nil {
+      return err
     }
     templateDir = filepath.Join(workingDirectory, templateDir)
   }
@@ -135,11 +135,10 @@ func doParse(siteRoot, templateDir string) error {
   }
 
   // Open the template file and make a reader.
-  var error error
   var file *os.File
-  file, error = os.Open(current.HardPath)
-  if error != nil {
-    return error
+  file, err := os.Open(current.HardPath)
+  if err != nil {
+    return err
   }
   reader := bufio.NewReader(file)
 
@@ -155,24 +154,29 @@ func doParse(siteRoot, templateDir string) error {
   // an opening or closing tag. In the former case the buffer must contain
   // static text, while the latter case is code or a template insertion.
   var buffer []rune
-  var ch rune
-  var size int
   countBytes, countRunes := 0, 0  // Byte and rune counts are logged.
   lineIndex := 1  // The line index is stored in template entries.
 
   for {
-    ch, size, error = reader.ReadRune()
-    if error == nil {
+    ch, size, err := reader.ReadRune()
+    if err == nil {
       buffer = append(buffer, ch)
       countBytes += size
       countRunes++
       if ch == '\n' {
         lineIndex++
       }
-    } else {               // We assume that the read failed due to EOF.
+    } else if err == io.EOF {
       content := string(buffer)
       pushStatic(content)
-      break
+      if verbose {
+        fmt.Fprintf(log, "parsed \"%s\"\n", current.GivenPath)
+        fmt.Fprintf(log, "read %d bytes, %d runes\n", countBytes, countRunes)
+        fmt.Fprintf(log, "finished on line %d\n", lineIndex)
+      }
+      return nil
+    } else {
+      return err
     }
 
     // Once a tag has been opened, we ignore further opening tags until
@@ -203,9 +207,9 @@ func doParse(siteRoot, templateDir string) error {
             hardDir = templateDir
           }
           hardPath := filepath.Join(hardDir, givenPath)
-          fileInfo, error := os.Stat(hardPath)
-          if error != nil {
-            return error
+          fileInfo, err := os.Stat(hardPath)
+          if err != nil {
+            return err
           }
           entry := Entry{
               GivenPath: givenPath,
@@ -216,9 +220,9 @@ func doParse(siteRoot, templateDir string) error {
           // Push the new entry onto the stack and make a recursive call.
           stack = append(stack, &entry)
           childTemplateDir := filepath.Dir(hardPath)
-          error = doParse(siteRoot, childTemplateDir)
-          if error != nil {
-            return error
+          err = doParse(siteRoot, childTemplateDir)
+          if err != nil {
+            return err
           }
           stack = stack[:len(stack)-1]
         }
@@ -227,15 +231,6 @@ func doParse(siteRoot, templateDir string) error {
       }
     }
   }
-  if verbose {
-    fmt.Fprintf(log, "parsed \"%s\"\n", current.GivenPath)
-    fmt.Fprintf(log, "read %d bytes, %d runes\n", countBytes, countRunes)
-    fmt.Fprintf(log, "finished on line %d\n", lineIndex)
-  }
-  if error == io.EOF {
-    return nil
-  }
-  return error
 }
 
 // pushCode makes a code section and adds it to the global sections.
@@ -270,14 +265,14 @@ func makeRawStrings(content string) (pieces []string) {
 // Process is the top-level template parsing function. It calls
 // parse, then glues the sections together and injects an import statement
 // as needed. The final result is printed to a buffered writer.
-func Process(siteRoot, templatePath string, writer *bufio.Writer) {
+func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   // Parse the template to obtain code sections and static sections.
-  error := parse(siteRoot, templatePath)
-  if error != nil {
-    message := fmt.Sprintf("Template parsing error: %s\n", error)
+  err := parse(siteRoot, templatePath)
+  if err != nil {
+    message := fmt.Sprintf("Template parsing error: %s\n", err)
     fmt.Fprint(os.Stderr, message)
     writer.WriteString(message)
-    return
+    return err
   }
 
   // Discard whitespace sections before the first code section.
@@ -386,14 +381,14 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
     }
   }
   fileSet := token.NewFileSet()
-  fileNode, error := parser.ParseFile(fileSet, "output", output.Bytes(),
+  fileNode, err := parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
-  if error != nil {
+  if err != nil {
     message := fmt.Sprintf("%s\n---\nError parsing code sections: %s\n",
-        output.Bytes(), error)
+        output.Bytes(), err)
     fmt.Fprint(os.Stderr, message)
     writer.WriteString(message)
-    return
+    return err
   }
 
   seekPath := "fmt"  // The print command is to be found in this package.
@@ -456,14 +451,14 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   // Have Go parse the whole output in preparation for import injection
   // and formatted code output.
   fileSet = token.NewFileSet()
-  fileNode, error = parser.ParseFile(fileSet, "output", output.Bytes(),
+  fileNode, err = parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
-  if error != nil {
+  if err != nil {
     message := fmt.Sprintf("%s\n---\nError parsing template output: %s\n",
-        output.Bytes(), error)
+        output.Bytes(), err)
     fmt.Fprint(os.Stderr, message)
     writer.WriteString(message)
-    return
+    return err
   }
   // Inject an import statement if necessary.
   if !isImported {
@@ -477,5 +472,6 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) {
   // Print with a custom configuration: soft tabs of two spaces each.
   config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
   (&config).Fprint(writer, fileSet, fileNode)
-}
+  return nil
+} // end Process
 

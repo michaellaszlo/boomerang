@@ -8,15 +8,63 @@ import (
   "bufio"
   "strings"
   "os"
+  "os/exec"
   "flag"
   "fmt"
   "path/filepath"
 )
 
-// Command-line flags:
+// Command-line flags
 var siteRoot, walkDirectory, listPath string
 
+// Print updates and errors to this file, probably stdout or stderr.
 var messageFile *os.File
+
+var GoPath = "go"
+
+func processTemplate(path string) {
+
+  // Make a .go file corresponding to the template file.
+  dir, file := filepath.Split(path)
+  if len(file) >= 4 && file[len(file)-4:] == ".boo" {
+    file = file[:len(file)-4]
+  }
+  goCodePath := filepath.Join(dir, file + ".go")
+  outFile, err := os.Create(goCodePath)
+  if err == nil {
+    fmt.Fprintf(messageFile, "created %s\n", goCodePath)
+  } else {
+    fmt.Fprintf(messageFile, "error on creating %s\n", goCodePath)
+    return
+  }
+
+  // Process the template, flush the output, close the file.
+  templateWriter := bufio.NewWriter(outFile)
+  fmt.Fprintf(messageFile, "parsing %s\n", path)
+  err = apptemplate.Process(siteRoot, path, templateWriter)
+  templateWriter.Flush()
+  outFile.Close()
+  if err != nil {
+    fmt.Fprintf(messageFile, "skipping compilation due to parsing error\n")
+    return
+  }
+
+  fmt.Fprintf(messageFile, "compiling %s\n", goCodePath)
+  /*
+  cmd := exec.Command("go", "build", goCodePath)
+  output, err := cmd.Output()
+  if err != nil {
+    fmt.Fprintf(messageFile, "error: %s\n", err)
+  }
+  fmt.Fprintf(messageFile, "output: %s\n", string(output))
+  */
+  cmd := exec.Command(GoPath, "build", goCodePath)
+  output, err := cmd.CombinedOutput()
+  if err != nil {
+    fmt.Fprintf(messageFile, "compilation error: %s\n", err)
+    fmt.Fprintf(messageFile, "command output: %s", string(output))
+  }
+}
 
 func directoryWalker(path string, info os.FileInfo, err error) error {
   if err != nil {
@@ -30,32 +78,6 @@ func directoryWalker(path string, info os.FileInfo, err error) error {
     processTemplate(path)
   }
   return nil
-}
-
-func makeTemplateWriter(path string) (*bufio.Writer, error) {
-  dir, file := filepath.Split(path)
-  if len(file) >= 4 && file[len(file)-4:] == ".boo" {
-    file = file[:len(file)-4]
-  }
-  outPath := filepath.Join(dir, file + ".source")
-  outFile, err := os.Create(outPath)
-  if err == nil {
-    fmt.Fprintf(messageFile, "created %s\n", outPath)
-  } else {
-    fmt.Fprintf(messageFile, "error on creating %s\n", outPath)
-  }
-  return bufio.NewWriter(outFile), err
-}
-
-func processTemplate(path string) {
-  templateWriter, err := makeTemplateWriter(path)
-  if err != nil {
-    fmt.Fprintf(messageFile, "%s\n", err.Error())
-  } else {
-    fmt.Fprintf(messageFile, "parsing %s\n", path)
-    apptemplate.Process(siteRoot, path, templateWriter)
-    templateWriter.Flush()
-  }
 }
 
 func main() {
