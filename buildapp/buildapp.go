@@ -50,14 +50,6 @@ func processTemplate(path string) {
   }
 
   fmt.Fprintf(messageFile, "compiling %s\n", goCodePath)
-  /*
-  cmd := exec.Command("go", "build", goCodePath)
-  output, err := cmd.Output()
-  if err != nil {
-    fmt.Fprintf(messageFile, "error: %s\n", err)
-  }
-  fmt.Fprintf(messageFile, "output: %s\n", string(output))
-  */
   cmd := exec.Command(GoPath, "build", goCodePath)
   output, err := cmd.CombinedOutput()
   if err != nil {
