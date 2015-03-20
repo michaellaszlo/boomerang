@@ -19,7 +19,7 @@ import (
   "golang.org/x/tools/go/ast/astutil"
 )
 
-var verbose = false
+var verbose = true
 var log = os.Stderr
 
 var MergeStaticText = true  // Concatenate consecutive static sections?
@@ -61,9 +61,14 @@ func (pattern *Pattern) Next(ch rune) bool {
   // Try to match the current rune in Text.
   if ch == pattern.Text[pattern.Pos] {
     pattern.Pos++
+    // Check for a complete match.
+    if pattern.Pos == pattern.Length {
+      return true
+    }
+  } else {
+    pattern.Pos = 0
   }
-  // Check for a complete match.
-  return pattern.Pos == pattern.Length
+  return false
 }
 
 
@@ -89,6 +94,7 @@ func (entry Entry) String() string {
 func parse(siteRoot, templatePath string) error {
   fileInfo, err := os.Stat(templatePath)
   if err != nil {
+    fmt.Fprintf(os.Stderr, "os.Stat failed in %s\n", templatePath)
     return err
   }
   // Work out the name of the containing directory. This becomes templateDir,
@@ -97,6 +103,7 @@ func parse(siteRoot, templatePath string) error {
   if !filepath.IsAbs(templatePath) {  // We want an absolute file-system path.
     workingDirectory, err := os.Getwd()
     if err != nil {
+      fmt.Fprintf(os.Stderr, "os.Getwd failed in %s\n", templatePath)
       return err
     }
     templateDir = filepath.Join(workingDirectory, templateDir)
@@ -118,7 +125,7 @@ func parse(siteRoot, templatePath string) error {
 func doParse(siteRoot, templateDir string) error {
   current := stack[len(stack)-1]
   if verbose {
-    fmt.Fprintf(log, "// start \"%s\"\n", current.GivenPath)
+    fmt.Fprintf(log, "  doParse \"%s\"\n", current.GivenPath)
   }
 
   // Check for an insertion cycle.
@@ -138,6 +145,7 @@ func doParse(siteRoot, templateDir string) error {
   var file *os.File
   file, err := os.Open(current.HardPath)
   if err != nil {
+    fmt.Fprintf(os.Stderr, "os.Open failed on %s\n", current.GivenPath)
     return err
   }
   reader := bufio.NewReader(file)
@@ -176,6 +184,8 @@ func doParse(siteRoot, templateDir string) error {
       }
       return nil
     } else {
+      fmt.Fprintf(os.Stderr, "reader.ReadRune failed in %s\n",
+          current.GivenPath)
       return err
     }
 
@@ -209,6 +219,7 @@ func doParse(siteRoot, templateDir string) error {
           hardPath := filepath.Join(hardDir, givenPath)
           fileInfo, err := os.Stat(hardPath)
           if err != nil {
+            fmt.Fprintf(os.Stderr, "os.Stat failed on %s\n", hardPath)
             return err
           }
           entry := Entry{
@@ -269,7 +280,8 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   // Parse the template to obtain code sections and static sections.
   err := parse(siteRoot, templatePath)
   if err != nil {
-    message := fmt.Sprintf("Template parsing error: %s\n", err)
+    message := fmt.Sprintf("Template parsing error in %s: %s\n",
+        templatePath, err)
     fmt.Fprint(os.Stderr, message)
     writer.WriteString(message)
     return err
