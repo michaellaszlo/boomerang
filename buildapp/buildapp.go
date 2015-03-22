@@ -30,6 +30,7 @@ func processTemplate(path string) {
     file = file[:len(file)-4]
   }
   goCodePath := filepath.Join(dir, file + ".go")
+  binaryPath := filepath.Join(dir, file)
   outFile, err := os.Create(goCodePath)
   if err == nil {
     fmt.Fprintf(messageFile, "created %s\n", goCodePath)
@@ -50,7 +51,7 @@ func processTemplate(path string) {
   }
 
   fmt.Fprintf(messageFile, "compiling %s\n", goCodePath)
-  cmd := exec.Command(GoPath, "build", goCodePath)
+  cmd := exec.Command(GoPath, "build", "-o", binaryPath, goCodePath)
   output, err := cmd.CombinedOutput()
   if err != nil {
     fmt.Fprintf(messageFile, "compilation error: %s\n", err)
