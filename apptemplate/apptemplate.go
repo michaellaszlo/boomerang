@@ -389,17 +389,17 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   output := bytes.Buffer{}
   for _, section := range sections {
     if section.Kind == Code {
-      fmt.Fprintf(&output, section.Text)
+      fmt.Fprint(&output, section.Text)
+      fmt.Fprint(&output, "\n")  // Ensure that statements are separated.
     }
   }
   fileSet := token.NewFileSet()
   fileNode, err := parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
   if err != nil {
-    message := fmt.Sprintf("%s\n---\nError parsing code sections: %s\n",
-        output.Bytes(), err)
+    message := fmt.Sprintf("Error parsing code sections: %s\n", err)
     fmt.Fprint(os.Stderr, message)
-    writer.WriteString(message)
+    writer.WriteString(fmt.Sprintf("%s\n---\n%s", output.Bytes(), message))
     return err
   }
 
@@ -451,7 +451,8 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   output.Reset()
   for _, section := range sections {
     if section.Kind == Code {
-      fmt.Fprintf(&output, section.Text)
+      fmt.Fprint(&output, section.Text)
+      fmt.Fprint(&output, "\n")  // Ensure that statements are separated.
     } else {
       pieces := makeRawStrings(section.Text)
       for _, piece := range pieces {
@@ -466,10 +467,9 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   fileNode, err = parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
   if err != nil {
-    message := fmt.Sprintf("%s\n---\nError parsing template output: %s\n",
-        output.Bytes(), err)
+    message := fmt.Sprintf("Error parsing template output: %s\n", err)
     fmt.Fprint(os.Stderr, message)
-    writer.WriteString(message)
+    writer.WriteString(fmt.Sprintf("%s\n---\n%s", output.Bytes(), message))
     return err
   }
   // Inject an import statement if necessary.
