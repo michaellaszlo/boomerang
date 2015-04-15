@@ -16,6 +16,7 @@ import (
 
 // Command-line flags
 var siteRoot, walkDirectory, listPath string
+var verbose bool
 
 // Print updates and errors to this file, probably stdout or stderr.
 var messageFile *os.File
@@ -30,7 +31,7 @@ func processTemplate(path string) {
     file = file[:len(file)-4]
   }
   goCodePath := filepath.Join(dir, file + ".go")
-  binaryPath := filepath.Join(dir, file)
+  binaryPath := filepath.Join(dir, file + ".cgi")
   outFile, err := os.Create(goCodePath)
   if err == nil {
     fmt.Fprintf(messageFile, "created %s\n", goCodePath)
@@ -95,8 +96,13 @@ func main() {
   flag.StringVar(&listPath, "l", "",
       "the path of a file that lists files to be processed")
 
+  flag.BoolVar(&verbose, "v", false,
+      "print verbose messages while parsing templates")
+
   flag.Parse()
   args := flag.Args()  // These arguments remain after flags are extracted.
+
+  apptemplate.Verbose = verbose
 
   if len(args) == 0  {
     // If no arguments remain after flag parsing, we're doing one of these:

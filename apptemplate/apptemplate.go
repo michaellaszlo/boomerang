@@ -19,7 +19,7 @@ import (
   "golang.org/x/tools/go/ast/astutil"
 )
 
-var verbose = true
+var Verbose = false
 var log = os.Stderr
 
 var MergeStaticText = true  // Concatenate consecutive static sections?
@@ -124,7 +124,7 @@ func parse(siteRoot, templatePath string) error {
 // doParse recursively parses a template and its children.
 func doParse(siteRoot, templateDir string) error {
   current := stack[len(stack)-1]
-  if verbose {
+  if Verbose {
     fmt.Fprintf(log, "  doParse \"%s\"\n", current.GivenPath)
   }
 
@@ -177,7 +177,7 @@ func doParse(siteRoot, templateDir string) error {
     } else if err == io.EOF {
       content := string(buffer)
       pushStatic(content)
-      if verbose {
+      if Verbose {
         fmt.Fprintf(log, "parsed \"%s\"\n", current.GivenPath)
         fmt.Fprintf(log, "read %d bytes, %d runes\n", countBytes, countRunes)
         fmt.Fprintf(log, "finished on line %d\n", lineIndex)
