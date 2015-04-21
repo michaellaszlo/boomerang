@@ -18,7 +18,7 @@ import (
 var siteRoot, walkDirectory, listPath string
 var verbose bool
 
-// Print updates and errors to this file, probably stdout or stderr.
+// We print parsing updates and errors to this file. Stderr is a good choice.
 var messageFile *os.File
 
 var GoPath = "go"

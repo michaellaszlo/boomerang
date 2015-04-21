@@ -1,4 +1,4 @@
-// Package apptemplate implements template parsing and code generation.
+// The apptemplate package implements template parsing and code generation.
 package apptemplate
 
 import (
@@ -24,7 +24,7 @@ var log = os.Stderr
 
 var MergeStaticText = true  // Concatenate consecutive static sections?
 
-var sections []*Section     // Stores output sections during template parsing.
+var sections []*Section  // Stores output sections during template parsing.
 var stack []*Entry  // Used to prevent template insertion cycles.
 
 // Section contains the text of a code section or static section.
@@ -159,8 +159,8 @@ func doParse(siteRoot, templateDir string) error {
   close := NewPattern("?>")
 
   // Each character goes into the buffer, which we empty whenever we match
-  // an opening or closing tag. In the former case the buffer must contain
-  // static text, while the latter case is code or a template insertion.
+  // an opening or closing tag. An opening tag signals the end of a static
+  // portion. A closing tag marks the end of code or an insert statement.
   var buffer []rune
   countBytes, countRunes := 0, 0  // Byte and rune counts are logged.
   lineIndex := 1  // The line index is stored in template entries.
@@ -403,9 +403,10 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
     return err
   }
 
-  seekPath := "fmt"  // The print command is to be found in this package.
+  // seekPath is the import path of the package containing the print command.
+  seekPath := "github.com/michaellaszlo/boomerang/runtime" 
   seekName := path.Base(seekPath)
-  printCall := "Print"
+  printCall := "WriteString"
 
   // Has the desired package been imported? Is the name available?
   isImported := false
