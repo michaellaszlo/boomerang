@@ -10,11 +10,12 @@ import (
   "bufio"
   "bytes"
   "fmt"
+  "strings"
 )
 
 //--- Output from the compiled program.
 
-var contentBuffer bytes.Buffer
+var contentBuffer = new(bytes.Buffer)
 
 // WriteString appends a string to the content buffer.
 func WriteString(s string) {
@@ -41,11 +42,13 @@ func Printf(format string, a ...interface{}) {
 // headers are printed by default. An additional header may be printed if
 // the user has requested an HTTP status change.
 func PrintCGI() {
+  contentString := strings.TrimSpace(contentBuffer.String())
   writer := bufio.NewWriter(os.Stdout)
-  writer.WriteString(fmt.Sprintf("Content-Length: %d\n", contentBuffer.Len()))
+  writer.WriteString(fmt.Sprintf("Content-Length: %d\n", len(contentString)))
   writer.WriteString("Content-Type: text/html; charset=utf-8\n")
   writer.WriteString("\n")
-  contentBuffer.WriteTo(writer)
+  writer.WriteString(contentString)
+  writer.WriteString("\n")
   writer.Flush()
 }
 
