@@ -13,9 +13,19 @@ import (
   "strings"
 )
 
-//--- Output from the compiled program.
+var (
+  statusHeader = ""
+  locationHeader = ""
+  headers = []string{ "Content-Type: text/html; charset=utf-8" }
+  contentBuffer = new(bytes.Buffer)
+)
 
-var contentBuffer = new(bytes.Buffer)
+func appendHeader(header string) {
+  headers = append(headers, header)
+}
+
+
+//--- User facilities for output.
 
 // WriteString appends a string to the content buffer.
 func WriteString(s string) {
@@ -37,15 +47,25 @@ func Printf(format string, a ...interface{}) {
   contentBuffer.WriteString(fmt.Sprintf(format, a...))
 }
 
+
+//-- Automatic output.
+
 // PrintCGI writes a whole CGI response: headers, blank line, body. The body
-// is made from contentBuffer. The headers Content-Length and Content-Type
-// headers are printed by default. An additional header may be printed if
-// the user has requested an HTTP status change.
+// is made from contentBuffer. The Content-Type and Content-Length
+// headers are printed by default. An additional header may be printed for
+// redirection or an HTTP status change.
 func PrintCGI() {
   contentString := strings.TrimSpace(contentBuffer.String())
+  if statusHeader != "" {
+    appendHeader(statusHeader)
+  }
+  if locationHeader != "" {
+    appendHeader(locationHeader)
+  }
+  appendHeader(fmt.Sprintf("Content-Length: %d\n", len(contentString)))
+  headerString := strings.Join(headers, "\n")
   writer := bufio.NewWriter(os.Stdout)
-  writer.WriteString(fmt.Sprintf("Content-Length: %d\n", len(contentString)))
-  writer.WriteString("Content-Type: text/html; charset=utf-8\n")
+  writer.WriteString(headerString)
   writer.WriteString("\n")
   writer.WriteString(contentString)
   writer.WriteString("\n")
@@ -57,9 +77,30 @@ func PrintBody() {
   contentBuffer.WriteTo(os.Stdout)
 }
 
-func SetHTTPStatus(code int, message string) {
+
+//--- HTTP redirection and status modification
+
+// SetHTTPStatus causes a status header to be added to the CGI output. It
+// can be called after body content has been emitted because the runtime
+// package buffers all CGI output. SetHTTPStatus can be called several
+// times and only the header generated for the final call will be emitted.
+func SetHTTPStatus(statusCode int, reasonPhrase string) {
+  statusHeader = fmt.Sprintf("Status: %d %s", statusCode, reasonPhrase)
 }
 
+// Redirect causes a Status header with "301 Moved Permanently" and a
+// Location header with the specified URL to be added to the CGI output.
+// Like SetHTTPStatus, it can be called after emittinng content and it can
+// be called several times, with only the final call taking effect.
 func Redirect(url string) {
+  RedirectWithStatus(url, 301, "Moved Permanently")
 }
+
+// RedirectWithStatus is like Redirect except it allows the caller to
+// specify a status code and reason phrase.
+func RedirectWithStatus(url string, statusCode int, reasonPhrase string) {
+  SetHTTPStatus(statusCode, reasonPhrase)
+  locationHeader = "Location: " + url
+}
+
 
