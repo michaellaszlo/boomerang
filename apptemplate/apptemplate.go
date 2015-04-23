@@ -13,6 +13,7 @@ import (
   "path/filepath"
   "errors"
   "bytes"
+  "go/ast"
   "go/token"
   "go/parser"
   "go/printer"
@@ -481,6 +482,20 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
       astutil.AddNamedImport(fileSet, fileNode, importAs, seekPath)
     }
   }
+
+  // Look for the main function.
+  ast.Inspect(fileNode, func(node ast.Node) bool {
+    funcDecl, hasType := node.(*ast.FuncDecl)
+    if hasType {
+      funcName := funcDecl.Name.Name
+      fmt.Fprintf(os.Stderr, "func %s\n", funcName)
+      if funcName == "main" {
+        fmt.Fprintf(os.Stderr, "  found it\n")
+      }
+      return false
+    }
+    return true
+  })
 
   // Print with a custom configuration: soft tabs of two spaces each.
   config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }

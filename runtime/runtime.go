@@ -83,14 +83,14 @@ func PrintBody() {
 // SetHTTPStatus causes a status header to be added to the CGI output. It
 // can be called after body content has been emitted because the runtime
 // package buffers all CGI output. SetHTTPStatus can be called several
-// times and only the header generated for the final call will be emitted.
+// times and only the header for the final call will be emitted.
 func SetHTTPStatus(statusCode int, reasonPhrase string) {
   statusHeader = fmt.Sprintf("Status: %d %s", statusCode, reasonPhrase)
 }
 
 // Redirect causes a Status header with "301 Moved Permanently" and a
 // Location header with the specified URL to be added to the CGI output.
-// Like SetHTTPStatus, it can be called after emittinng content and it can
+// Like SetHTTPStatus, it can be called after emitting content and it can
 // be called several times, with only the final call taking effect.
 func Redirect(url string) {
   RedirectWithStatus(url, 301, "Moved Permanently")
