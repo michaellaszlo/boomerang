@@ -484,6 +484,17 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   }
 
   // Look for the main function.
+  for _, decl := range fileNode.Decls {
+    funcDecl, hasType := decl.(*ast.FuncDecl)
+    if hasType {
+      funcName := funcDecl.Name.Name
+      fmt.Fprintf(os.Stderr, "func %s\n", funcName)
+      if funcName == "main" {
+        fmt.Fprintf(os.Stderr, "  found it\n")
+      }
+    }
+  }
+  /*
   ast.Inspect(fileNode, func(node ast.Node) bool {
     funcDecl, hasType := node.(*ast.FuncDecl)
     if hasType {
@@ -496,6 +507,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
     }
     return true
   })
+  */
 
   // Print with a custom configuration: soft tabs of two spaces each.
   config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
