@@ -395,7 +395,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
     }
   }
   fileSet := token.NewFileSet()
-  fileNode, err := parser.ParseFile(fileSet, "output", output.Bytes(),
+  file, err := parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
   if err != nil {
     message := fmt.Sprintf("Error parsing code sections: %s\n", err)
@@ -414,7 +414,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   var importedAs string          // Use this if the path has been imported.
   seenName := map[string]bool{}  // Consult this if we have to import.
 
-  for _, importSpec := range fileNode.Imports {
+  for _, importSpec := range file.Imports {
     importPath, _ := strconv.Unquote(importSpec.Path.Value)
     var importName string
     if importSpec.Name == nil {
@@ -466,7 +466,7 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   // Have Go parse the whole output in preparation for import injection
   // and formatted code output.
   fileSet = token.NewFileSet()
-  fileNode, err = parser.ParseFile(fileSet, "output", output.Bytes(),
+  file, err = parser.ParseFile(fileSet, "output", output.Bytes(),
       parser.ParseComments)
   if err != nil {
     message := fmt.Sprintf("Error parsing template output: %s\n", err)
@@ -477,41 +477,38 @@ func Process(siteRoot, templatePath string, writer *bufio.Writer) error {
   // Inject an import statement if necessary.
   if !isImported {
     if importAs == seekName {  // Make 'import "fmt"', not 'import fmt "fmt"'.
-      astutil.AddImport(fileSet, fileNode, seekPath)
+      astutil.AddImport(fileSet, file, seekPath)
     } else {                   // AddNamedImport would make 'import fmt "fmt"'.
-      astutil.AddNamedImport(fileSet, fileNode, importAs, seekPath)
+      astutil.AddNamedImport(fileSet, file, importAs, seekPath)
     }
   }
 
-  // Look for the main function.
-  for _, decl := range fileNode.Decls {
+  // Look for the main function among the top-level declarations.
+  for _, decl := range file.Decls {
     funcDecl, hasType := decl.(*ast.FuncDecl)
     if hasType {
       funcName := funcDecl.Name.Name
-      fmt.Fprintf(os.Stderr, "func %s\n", funcName)
       if funcName == "main" {
-        fmt.Fprintf(os.Stderr, "  found it\n")
+        // Build a new statement: defer runtime.PrintCGI()
+        statement := &ast.DeferStmt{
+          Call: &ast.CallExpr {
+            Fun: &ast.SelectorExpr {
+              X: ast.NewIdent("runtime"),
+              Sel: ast.NewIdent("PrintCGI"),
+            },
+          },
+        }
+        // Insert the new statement at the head of func main()
+        oldStatements := funcDecl.Body.List
+        newStatements := []ast.Stmt{ statement }
+        funcDecl.Body.List = append(newStatements, oldStatements...)
       }
     }
   }
-  /*
-  ast.Inspect(fileNode, func(node ast.Node) bool {
-    funcDecl, hasType := node.(*ast.FuncDecl)
-    if hasType {
-      funcName := funcDecl.Name.Name
-      fmt.Fprintf(os.Stderr, "func %s\n", funcName)
-      if funcName == "main" {
-        fmt.Fprintf(os.Stderr, "  found it\n")
-      }
-      return false
-    }
-    return true
-  })
-  */
 
   // Print with a custom configuration: soft tabs of two spaces each.
   config := printer.Config{ Mode: printer.UseSpaces, Tabwidth: 2 }
-  (&config).Fprint(writer, fileSet, fileNode)
+  (&config).Fprint(writer, fileSet, file)
   return nil
 } // end Process
 
